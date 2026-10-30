@@ -27,6 +27,7 @@ const VALID_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   [PaymentStatus.REQUIRES_RECONCILIATION]: [
     PaymentStatus.PROCESSING,
     PaymentStatus.COMPLETED,
+    PaymentStatus.FAILED,
   ],
   [PaymentStatus.COMPLETED]: [], // Terminal state
   [PaymentStatus.FAILED]: [], // Terminal state

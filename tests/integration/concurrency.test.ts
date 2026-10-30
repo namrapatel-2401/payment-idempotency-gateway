@@ -25,18 +25,14 @@ describe("Concurrency & Race Conditions - Integration", () => {
     const dbSetup = await startTestDatabase();
     testDb = dbSetup.db;
 
-    process.env.DB_HOST = dbSetup.connectionConfig.host;
-    process.env.DB_PORT = String(dbSetup.connectionConfig.port);
-    process.env.DB_NAME = dbSetup.connectionConfig.database;
-    process.env.DB_USER = dbSetup.connectionConfig.user;
-    process.env.DB_PASSWORD = dbSetup.connectionConfig.password;
-
     app = await buildApp();
     await app.ready();
   }, 180000);
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
     await stopTestDatabase();
   });
 

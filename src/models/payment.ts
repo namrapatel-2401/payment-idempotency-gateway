@@ -45,6 +45,7 @@ export interface IdempotencyKey {
   response_code: number | null;
   response_body: any | null;
   locked_at: Date | null;
+  claim_generation: number;
   created_at: Date;
   updated_at: Date;
   expires_at: Date;
@@ -62,6 +63,9 @@ export interface Payment {
   status: string;
   provider_id: string | null;
   provider_status: string | null;
+  provider_revision: number | null;
+  provider_event_at: Date | null;
+  provider_observation_source: string | null;
   failure_reason: string | null;
   metadata: Record<string, any>;
   created_at: Date;
@@ -85,4 +89,6 @@ export enum PaymentEventType {
   FAILED = "payment.failed",
   REQUIRES_RECONCILIATION = "payment.requires_reconciliation",
   RECONCILED = "payment.reconciled",
+  WEBHOOK_CONFLICT = "webhook.provider_conflict",
+  WEBHOOK_CONFLICT_IGNORED = "webhook.conflict_ignored",
 }

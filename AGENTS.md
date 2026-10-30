@@ -65,18 +65,23 @@ Always execute tests before claiming they pass. Distinguish unit, integration, R
 
 ## Current audit baseline
 
-As of 2026-10-30:
+Verified 2026-10-30:
 
-- 65 unit tests pass.
-- PostgreSQL integration tests fail before assertions because Testcontainers cannot obtain a usable Docker runtime.
-- Redis rate limiting is a stub that always permits requests; Redis integration is unverified.
+- Stage 1 is implemented and approved: transaction-aware repository calls, atomic payment acquisition, stable provider idempotency keys, claim-generation fencing, and the lock order `idempotency_keys -> payments -> payment_events`.
+- 67 unit tests pass.
+- PostgreSQL integration tests pass against real Testcontainers PostgreSQL: 36/36 in parallel mode and 36/36 in serial mode.
+- Integration setup reloads the dynamic container configuration, resets and closes the application Knex pool, stops containers after pool teardown, and uses forked Vitest processes for parallel isolation.
+- Redis rate limiting is still a stub that always permits requests; Redis integration is unverified.
 - E2E tests are simulator stubs, not full-stack tests.
-- The TypeScript build currently fails.
-- Docker Compose validation currently fails because the Compose file defines duplicate `volumes` keys.
-- Repository methods do not consistently use the supplied Knex transaction handle, so documented transaction boundaries require verification before being treated as reliable.
-- The project directory is not currently a Git repository; Git status and history are unavailable.
+- The TypeScript build currently fails in `src/redis/rate-limit.ts` because of a `.ts` import extension and unused stub parameters.
+- Docker Compose validation still fails because the Compose file defines duplicate `volumes` keys.
+- The project is a Git repository with the initial baseline commit. Stage 1 and test-infrastructure changes remain uncommitted; `.claude/` remains untracked and must not be committed.
+- Stage 2 is implemented and verified: durable webhook claiming, canonical payload hashes, provider revisions, terminal-state protection, orphan recovery, durable provider-state conflicts, provider-correlation conflicts, legacy charge-ID fallback, and unique provider charge IDs.
+- Stage 3 preflight correctness is implemented and verified: provider lookup success/failure results use fenced shared observation persistence, null lookup outcomes remain recoverable, and webhook-established terminal results fence older reconciliation responses.
+- Migration rollback restrictions: migration 003 must not be rolled back while claim-generation fencing data may be active; migration 004 can remove durable Stage 2 conflict evidence and is restricted to databases where that evidence is intentionally absent; migration 005 refuses rollback when nullable Stage 2 data or correlation-conflict records would be lost or invalidated.
+- Merchant/account authorization and multi-tenant idempotency-key isolation are outside the current project scope.
 
-These facts must be re-verified rather than assumed in future sessions.
+Re-verify these facts before future claims about completion.
 
 ## Change policy
 

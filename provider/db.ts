@@ -9,6 +9,7 @@ export interface ProviderCharge {
   customer_email: string;
   description?: string;
   status: 'succeeded' | 'failed';
+  provider_revision: number;
   failure_message?: string;
   created_at: Date;
 }
@@ -44,6 +45,7 @@ export const createCharge = (
     customer_email: string;
     description?: string;
     status: 'succeeded' | 'failed';
+    provider_revision?: number;
     failure_message?: string;
   }
 ): ProviderCharge => {
@@ -54,6 +56,7 @@ export const createCharge = (
     idempotency_key: idempotencyKey,
     request_hash: requestHash,
     ...data,
+    provider_revision: data.provider_revision ?? 1,
     created_at: new Date(),
   };
 

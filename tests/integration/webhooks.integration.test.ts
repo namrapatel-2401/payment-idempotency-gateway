@@ -17,6 +17,7 @@ import {
 } from "../setup/test-db.js";
 import { PaymentStatus } from "../../src/models/payment-status.js";
 import { generateWebhookSignature } from "../../src/routes/webhooks.js";
+import { PaymentProviderClient } from "../../src/services/provider.client.js";
 import { config } from "../../src/config.js";
 import {
   deriveProviderIdempotencyKey,
@@ -57,18 +58,14 @@ describe("Webhooks Processing - PostgreSQL Integration", () => {
     const dbSetup = await startTestDatabase();
     testDb = dbSetup.db;
 
-    process.env.DB_HOST = dbSetup.connectionConfig.host;
-    process.env.DB_PORT = String(dbSetup.connectionConfig.port);
-    process.env.DB_NAME = dbSetup.connectionConfig.database;
-    process.env.DB_USER = dbSetup.connectionConfig.user;
-    process.env.DB_PASSWORD = dbSetup.connectionConfig.password;
-
     app = await buildApp();
     await app.ready();
   }, 180000);
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
     await stopTestDatabase();
   });
 
@@ -81,7 +78,7 @@ describe("Webhooks Processing - PostgreSQL Integration", () => {
    * Helper to seed an existing payment in PostgreSQL.
    */
   const seedPayment = async (options: {
-    providerId: string;
+    providerId?: string;
     status: PaymentStatus;
     amount?: number;
     currency?: string;
@@ -112,7 +109,7 @@ describe("Webhooks Processing - PostgreSQL Integration", () => {
       .insert({
         idempotency_key_id: keyRecord.id,
         provider_idempotency_key: providerKey,
-        provider_id: options.providerId,
+        provider_id: options.providerId || null,
         amount: options.amount || 100,
         currency: options.currency || "USD",
         customer_email: options.customerEmail || "webhook-test@example.com",
@@ -466,6 +463,259 @@ describe("Webhooks Processing - PostgreSQL Integration", () => {
       .where({ webhook_id: "evt_orphaned_005" })
       .first();
     expect(delivery).toBeDefined();
+  });
+
+  it("8. should detect a same-event payload hash conflict without changing payment state", async () => {
+    const chargeId = "ch_payload_conflict_008";
+    const { paymentRecord } = await seedPayment({
+      providerId: chargeId,
+      status: PaymentStatus.PROCESSING,
+    });
+    const firstPayload = {
+      event_id: "evt_payload_conflict_008",
+      event_type: "payment.succeeded",
+      charge_id: chargeId,
+      idempotency_key: "prov-key-conflict-008",
+      status: "succeeded",
+      timestamp: new Date().toISOString(),
+    };
+    const firstRaw = JSON.stringify(firstPayload);
+    const first = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": generateWebhookSignature(firstRaw, config.webhook.secret),
+      },
+      payload: firstRaw,
+    });
+    expect(first.statusCode).toBe(200);
+
+    const conflictingPayload = {
+      event_id: "evt_payload_conflict_008",
+      event_type: "payment.failed",
+      charge_id: chargeId,
+      idempotency_key: "prov-key-conflict-008",
+      status: "failed",
+      failure_message: "conflicting signed payload",
+      timestamp: new Date().toISOString(),
+    };
+    const conflictingRaw = JSON.stringify(conflictingPayload);
+    const second = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": generateWebhookSignature(conflictingRaw, config.webhook.secret),
+      },
+      payload: conflictingRaw,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(JSON.parse(second.body).conflict).toBe(true);
+    expect((await testDb("payments").where({ id: paymentRecord.id }).first()).status).toBe(
+      PaymentStatus.COMPLETED,
+    );
+    expect(await testDb("webhook_delivery_conflicts").where({
+      webhook_delivery_id: (await testDb("webhook_deliveries").where({ webhook_id: firstPayload.event_id }).first()).id,
+    })).toHaveLength(1);
+  });
+
+  it("9. should resolve an orphan exactly once when provider persistence makes the payment identifiable", async () => {
+    const gatewayKey = "orphan-recovery-key-009";
+    const providerKey = deriveProviderIdempotencyKey(gatewayKey);
+    const chargeId = "ch_orphan_recovery_009";
+    const orphanPayload = {
+      event_id: "evt_orphan_recovery_009",
+      event_type: "payment.succeeded",
+      charge_id: chargeId,
+      idempotency_key: providerKey,
+      status: "succeeded",
+      timestamp: new Date().toISOString(),
+    };
+    const raw = JSON.stringify(orphanPayload);
+    const orphanResponse = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": generateWebhookSignature(raw, config.webhook.secret),
+      },
+      payload: raw,
+    });
+    expect(orphanResponse.statusCode).toBe(200);
+    expect(JSON.parse(orphanResponse.body).orphaned).toBe(true);
+
+    vi.spyOn(PaymentProviderClient.prototype, "createCharge").mockResolvedValueOnce({
+      id: chargeId,
+      status: "succeeded",
+      amount: 100,
+      currency: "USD",
+      provider_revision: 1,
+    });
+    const paymentResponse = await app.inject({
+      method: "POST",
+      url: "/payments",
+      headers: { "idempotency-key": gatewayKey },
+      payload: {
+        amount: 100,
+        currency: "USD",
+        customer_email: "orphan-recovery@example.com",
+      },
+    });
+    expect(paymentResponse.statusCode).toBe(201);
+    const orphan = await testDb("orphaned_webhooks").where({ webhook_id: orphanPayload.event_id }).first();
+    expect(orphan.resolved).toBe(true);
+    expect(await testDb("payment_events").where({ payment_id: (await testDb("payments").where({ provider_id: chargeId }).first()).id })).toHaveLength(2);
+  });
+
+  it("10. should support a charge-ID-only legacy webhook", async () => {
+    const chargeId = "ch_legacy_charge_only_010";
+    const { paymentRecord } = await seedPayment({
+      providerId: chargeId,
+      status: PaymentStatus.PROCESSING,
+    });
+    const payload = {
+      event_id: "evt_legacy_charge_only_010",
+      event_type: "payment.succeeded",
+      charge_id: chargeId,
+      status: "succeeded",
+      timestamp: new Date().toISOString(),
+    };
+    const raw = JSON.stringify(payload);
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": generateWebhookSignature(raw, config.webhook.secret),
+      },
+      payload: raw,
+    });
+    expect(response.statusCode).toBe(200);
+    expect((await testDb("payments").where({ id: paymentRecord.id }).first()).status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  it("11. should correlate an idempotency-key-only webhook", async () => {
+    const { paymentRecord } = await seedPayment({
+      providerId: undefined,
+      status: PaymentStatus.PROCESSING,
+    });
+    const payload = {
+      event_id: "evt_key_only_011",
+      event_type: "payment.succeeded",
+      idempotency_key: paymentRecord.provider_idempotency_key,
+      status: "succeeded",
+      timestamp: new Date().toISOString(),
+    };
+    const raw = JSON.stringify(payload);
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": generateWebhookSignature(raw, config.webhook.secret),
+      },
+      payload: raw,
+    });
+    expect(response.statusCode).toBe(200);
+    const updated = await testDb("payments").where({ id: paymentRecord.id }).first();
+    expect(updated.status).toBe(PaymentStatus.COMPLETED);
+    expect(updated.provider_id).toBeNull();
+  });
+
+  it("12. should accept matching charge ID and provider key", async () => {
+    const chargeId = "ch_matching_identifiers_012";
+    const { paymentRecord } = await seedPayment({ providerId: chargeId, status: PaymentStatus.PROCESSING });
+    const payload = {
+      event_id: "evt_matching_identifiers_012",
+      event_type: "payment.succeeded",
+      charge_id: chargeId,
+      idempotency_key: paymentRecord.provider_idempotency_key,
+      status: "succeeded",
+      timestamp: new Date().toISOString(),
+    };
+    const raw = JSON.stringify(payload);
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: { "content-type": "application/json", "x-webhook-signature": generateWebhookSignature(raw, config.webhook.secret) },
+      payload: raw,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).correlation_conflict).toBeUndefined();
+  });
+
+  it("13. should durably record mismatched identifiers without mutating either payment", async () => {
+    const first = await seedPayment({ providerId: "ch_mismatch_first_013", status: PaymentStatus.PROCESSING });
+    const second = await seedPayment({ providerId: "ch_mismatch_second_013", status: PaymentStatus.PROCESSING });
+    const payload = {
+      event_id: "evt_mismatch_identifiers_013",
+      event_type: "payment.succeeded",
+      charge_id: first.paymentRecord.provider_id,
+      idempotency_key: second.paymentRecord.provider_idempotency_key,
+      status: "succeeded",
+      timestamp: new Date().toISOString(),
+    };
+    const raw = JSON.stringify(payload);
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: { "content-type": "application/json", "x-webhook-signature": generateWebhookSignature(raw, config.webhook.secret) },
+      payload: raw,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).correlation_conflict).toBe(true);
+    expect((await testDb("payments").where({ id: first.paymentRecord.id }).first()).status).toBe(PaymentStatus.PROCESSING);
+    expect((await testDb("payments").where({ id: second.paymentRecord.id }).first()).status).toBe(PaymentStatus.PROCESSING);
+    expect(await testDb("provider_correlation_conflicts").where({ provider_event_id: payload.event_id })).toHaveLength(1);
+    expect(await testDb("payment_events")).toHaveLength(0);
+  });
+
+  it("14. should deduplicate a repeated correlation-conflict delivery", async () => {
+    const first = await seedPayment({ providerId: "ch_repeat_first_014", status: PaymentStatus.PROCESSING });
+    const second = await seedPayment({ providerId: "ch_repeat_second_014", status: PaymentStatus.PROCESSING });
+    const payload = {
+      event_id: "evt_repeat_mismatch_014",
+      event_type: "payment.succeeded",
+      charge_id: first.paymentRecord.provider_id,
+      idempotency_key: second.paymentRecord.provider_idempotency_key,
+      status: "succeeded",
+      timestamp: new Date().toISOString(),
+    };
+    const raw = JSON.stringify(payload);
+    const headers = { "content-type": "application/json", "x-webhook-signature": generateWebhookSignature(raw, config.webhook.secret) };
+    const [firstResponse, secondResponse] = await Promise.all([
+      app.inject({ method: "POST", url: "/webhooks/payment-provider", headers, payload: raw }),
+      app.inject({ method: "POST", url: "/webhooks/payment-provider", headers, payload: raw }),
+    ]);
+    const responseBodies = [JSON.parse(firstResponse.body), JSON.parse(secondResponse.body)];
+    expect(responseBodies.filter((body) => body.correlation_conflict === true)).toHaveLength(1);
+    expect(responseBodies.filter((body) => body.duplicate === true)).toHaveLength(1);
+    expect(await testDb("provider_correlation_conflicts").where({ provider_event_id: payload.event_id })).toHaveLength(1);
+  });
+
+  it("15. should preserve payment state when correlation validation rejects the event", async () => {
+    const first = await seedPayment({ providerId: "ch_rollback_first_015", status: PaymentStatus.PROCESSING });
+    const second = await seedPayment({ providerId: "ch_rollback_second_015", status: PaymentStatus.PROCESSING });
+    const payload = {
+      event_id: "evt_rollback_correlation_015",
+      event_type: "payment.failed",
+      charge_id: first.paymentRecord.provider_id,
+      idempotency_key: second.paymentRecord.provider_idempotency_key,
+      status: "failed",
+      timestamp: new Date().toISOString(),
+    };
+    const raw = JSON.stringify(payload);
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/payment-provider",
+      headers: { "content-type": "application/json", "x-webhook-signature": generateWebhookSignature(raw, config.webhook.secret) },
+      payload: raw,
+    });
+    expect(response.statusCode).toBe(200);
+    expect((await testDb("payments").where({ id: first.paymentRecord.id }).first()).status).toBe(PaymentStatus.PROCESSING);
+    expect((await testDb("payments").where({ id: second.paymentRecord.id }).first()).status).toBe(PaymentStatus.PROCESSING);
+    expect(await testDb("payment_events")).toHaveLength(0);
   });
 
   it("6. should reject webhook timestamp older than 5 minutes or in the future", async () => {

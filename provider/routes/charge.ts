@@ -82,6 +82,7 @@ export const chargeRoutes = async (app: FastifyInstance) => {
       return reply.status(200).send({
         id: existingCharge.id,
         status: existingCharge.status,
+        provider_revision: existingCharge.provider_revision,
         amount: existingCharge.amount,
         currency: existingCharge.currency,
         failure_message: existingCharge.failure_message,
@@ -128,6 +129,7 @@ export const chargeRoutes = async (app: FastifyInstance) => {
     return reply.status(200).send({
       id: charge.id,
       status: charge.status,
+      provider_revision: charge.provider_revision,
       amount: charge.amount,
       currency: charge.currency,
       failure_message: charge.failure_message,
@@ -156,6 +158,7 @@ export const chargeRoutes = async (app: FastifyInstance) => {
       return reply.status(200).send({
         id: charge.id,
         status: charge.status,
+        provider_revision: charge.provider_revision,
         amount: charge.amount,
         currency: charge.currency,
         failure_message: charge.failure_message,
@@ -180,6 +183,7 @@ export const chargeRoutes = async (app: FastifyInstance) => {
       return reply.status(200).send({
         id: charge.id,
         status: charge.status,
+        provider_revision: charge.provider_revision,
         amount: charge.amount,
         currency: charge.currency,
         failure_message: charge.failure_message,

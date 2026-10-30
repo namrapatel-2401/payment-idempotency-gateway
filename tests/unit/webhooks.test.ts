@@ -172,12 +172,16 @@ describe("Webhook Processing - Unit Tests", () => {
     let mockEvents: any[];
     let mockDeliveries: Map<string, any>;
     let mockOrphaned: any[];
+    let mockKeys: Map<string, any>;
+    let mockDeliveryConflicts: any[];
 
     beforeEach(async () => {
       mockPayments = new Map();
       mockEvents = [];
       mockDeliveries = new Map();
       mockOrphaned = [];
+      mockKeys = new Map();
+      mockDeliveryConflicts = [];
 
       // Create mock DB transaction & queries
       const mockTrx = (table: string) => {
@@ -191,14 +195,25 @@ describe("Webhook Processing - Unit Tests", () => {
                 return undefined;
               },
             }),
-            insert: async (data: any) => {
-              if (mockDeliveries.has(data.webhook_id)) {
-                const err: any = new Error("Unique constraint violation");
-                err.code = "23505";
-                throw err;
-              }
-              mockDeliveries.set(data.webhook_id, data);
-              return [data];
+            insert: (data: any) => {
+              const builder: any = {
+                onConflict: () => builder,
+                ignore: () => {
+                  if (mockDeliveries.has(data.webhook_id)) return [];
+                  const record = { id: `delivery-${data.webhook_id}`, ...data };
+                  mockDeliveries.set(data.webhook_id, record);
+                  builder._result = [record];
+                  return builder;
+                },
+                returning: async () => {
+                  if (builder._result) return builder._result;
+                  if (mockDeliveries.has(data.webhook_id)) return [];
+                  const record = { id: `delivery-${data.webhook_id}`, ...data };
+                  mockDeliveries.set(data.webhook_id, record);
+                  return [record];
+                },
+              };
+              return builder;
             },
           };
         }
@@ -219,6 +234,11 @@ describe("Webhook Processing - Unit Tests", () => {
                   (p) => p.provider_id === builder._criteria.provider_id,
                 );
               }
+                if (builder._criteria?.provider_idempotency_key) {
+                  return Array.from(mockPayments.values()).find(
+                    (p) => p.provider_idempotency_key === builder._criteria.provider_idempotency_key,
+                  );
+                }
               if (builder._criteria?.id) {
                 return mockPayments.get(builder._criteria.id);
               }
@@ -233,12 +253,75 @@ describe("Webhook Processing - Unit Tests", () => {
               }
               return 1;
             },
+            orWhere: (criteria: any) => {
+              builder._orCriteria = criteria;
+              const originalFirst = builder.first;
+              builder.first = async () => {
+                const direct = await originalFirst();
+                if (direct) return direct;
+                return Array.from(mockPayments.values()).find(
+                  (p) => p.provider_id === builder._orCriteria.provider_id,
+                );
+              };
+              return builder;
+            },
           };
           return {
             where: (criteria: any) => {
               builder._criteria = criteria;
               return builder;
             },
+          };
+        }
+        if (table === "idempotency_keys") {
+          const builder: any = {
+            forUpdate: () => builder,
+            where: (criteria: any) => {
+              builder._criteria = criteria;
+              return builder;
+            },
+            first: async () => {
+              const id = builder._criteria?.id;
+              if (!mockKeys.has(id)) {
+                mockKeys.set(id, {
+                  id,
+                  status: "processing",
+                  response_code: null,
+                  response_body: null,
+                });
+              }
+              return mockKeys.get(id);
+            },
+            update: async (data: any) => {
+              const key = mockKeys.get(builder._criteria?.id);
+              if (key) Object.assign(key, data);
+              return 1;
+            },
+          };
+          return builder;
+        }
+        if (table === "provider_conflicts") {
+          return {
+            insert: (data: any) => ({
+              onConflict: () => ({
+                ignore: async () => {
+                  mockDeliveryConflicts.push(data);
+                  return [data];
+                },
+              }),
+            }),
+          };
+        }
+        if (table === "webhook_delivery_conflicts") {
+          return {
+            insert: (data: any) => ({
+              onConflict: () => ({
+                ignore: async () => {
+                  mockDeliveryConflicts.push(data);
+                  return [data];
+                },
+              }),
+            }),
           };
         }
         if (table === "payment_events") {

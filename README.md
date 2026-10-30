@@ -52,15 +52,28 @@ Expected response:
 
 ## Project Status
 
-✅ **Phase 1: Foundation** (Complete)
-- TypeScript + Fastify setup
-- PostgreSQL database with Knex
-- Docker Compose configuration
-- Health check endpoint
-- Structured logging (Pino)
-- Environment validation (Zod)
+✅ **Stage 1: Transaction propagation and atomic payment acquisition**
+- Transaction-aware repository operations
+- Atomic idempotency-key acquisition
+- Stable provider idempotency keys
+- Claim-generation fencing for stale workers
+- Consistent lock order: `idempotency_keys → payments → payment_events`
+- Provider HTTP calls remain outside database transactions
 
-🔄 **Phase 2: State Machine + Models** (Next)
+✅ **Integration test infrastructure**
+- Testcontainers connection settings are loaded before application initialization
+- Application Knex pools are closed before test pools and containers
+- Parallel suites run in isolated forked processes
+- PostgreSQL integration suite: 36/36 passing in parallel and serial modes
+
+✅ **Stage 2: Webhook and terminal-state consistency**
+- Durable webhook claiming and payload-hash conflict history
+- Canonical payload hashing independent of JSON key order
+- Provider revisions and terminal-state protection
+- Orphan webhook recovery using the same observation application logic
+- Durable provider-state and provider-correlation conflict records
+- Charge-ID-only and provider-key-only webhook correlation
+- Unique non-null provider charge IDs
 
 ## Tech Stack
 
@@ -91,17 +104,23 @@ npm run migrate:rollback
 
 ## Architecture
 
-See `C:\Users\ASUS\.claude-omniroute\plans\sleepy-sniffing-avalanche.md` for complete architectural details, database schema, state machine, and failure scenarios.
+See `docs/architecture.md`, `docs/idempotency-design.md`, and `docs/failure-scenarios.md` for the current architecture and reliability rules.
 
 ## License
 
 MIT
 
-## Documentation & Deferred Tests
-- Phase 6 integration tests deferred (Docker unavailable).
-- Phase 7 Redis rate-limit deferred; mock passes.
-- Phase 8 observability implemented (Pino).
-- Phase 9 E2E deferred; retry simulator present.
-- Phase 10 docs added (docs/architecture.md, idempotency-design.md, failure-scenarios.md).
+## Verification & Deferred Work
 
-Run: npm run test:unit (65 pass). Integration/E2E need docker-compose up.
+- `npm run test:unit`: 67 tests pass.
+- `npm run test:integration`: 30 PostgreSQL tests pass with Docker/Testcontainers in parallel and serial modes.
+- On Windows with Docker Desktop, Testcontainers may need a session-only endpoint override:
+  `$env:DOCKER_HOST = "npipe:////./pipe/dockerDesktopLinuxEngine"`.
+- `npm run build`: currently fails in the Redis rate-limit stub.
+- Redis rate limiting remains a permissive stub and Redis integration is unverified.
+- E2E tests are retry-simulator stubs, not full-stack tests.
+- Docker Compose validation still requires correction for duplicate `volumes` keys.
+- Merchant/account authorization and multi-tenant idempotency-key isolation are outside this portfolio project's scope.
+- Stage 3 background reconciliation scheduling and real Redis rate limiting remain future work.
+- Stage 3 preflight reconciliation correctness is complete: succeeded and failed provider lookup results use the shared fenced observation path, while unknown results remain recoverable.
+- Migration 003 rollback is restricted while claim-generation fencing data may be active. Migration 004 rollback may remove durable Stage 2 conflict history and must only be used when those records are intentionally absent. Migration 005 refuses rollback when nullable Stage 2 data or correlation-conflict records would be lost or invalidated.

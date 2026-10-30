@@ -14,6 +14,7 @@ export interface ProviderChargeResponse {
   amount: number;
   currency: string;
   failure_message?: string;
+  provider_revision?: number;
 }
 
 export class PaymentProviderClient {
