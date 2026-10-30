@@ -71,13 +71,13 @@ describe("Payment State Machine", () => {
       ).toBe(false);
     });
 
-    it("should reject REQUIRES_RECONCILIATION -> FAILED", () => {
+    it("should allow REQUIRES_RECONCILIATION -> FAILED after reconciliation", () => {
       expect(
         isValidTransition(
           PaymentStatus.REQUIRES_RECONCILIATION,
           PaymentStatus.FAILED,
         ),
-      ).toBe(false);
+      ).toBe(true);
     });
   });
 
@@ -120,13 +120,14 @@ describe("Payment State Machine", () => {
       expect(nextStates).toContain(PaymentStatus.REQUIRES_RECONCILIATION);
     });
 
-    it("should return [PROCESSING, COMPLETED] for REQUIRES_RECONCILIATION", () => {
+    it("should return [PROCESSING, COMPLETED, FAILED] for REQUIRES_RECONCILIATION", () => {
       const nextStates = getValidNextStates(
         PaymentStatus.REQUIRES_RECONCILIATION,
       );
-      expect(nextStates).toHaveLength(2);
+      expect(nextStates).toHaveLength(3);
       expect(nextStates).toContain(PaymentStatus.PROCESSING);
       expect(nextStates).toContain(PaymentStatus.COMPLETED);
+      expect(nextStates).toContain(PaymentStatus.FAILED);
     });
 
     it("should return empty array for COMPLETED", () => {

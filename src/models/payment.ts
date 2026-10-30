@@ -46,6 +46,14 @@ export interface IdempotencyKey {
   response_body: any | null;
   locked_at: Date | null;
   claim_generation: number;
+  reconciliation_status?: string | null;
+  reconciliation_attempts?: number;
+  next_reconciliation_at?: Date | null;
+  reconciliation_claim_token?: string | null;
+  reconciliation_locked_at?: Date | null;
+  reconciliation_last_error?: string | null;
+  reconciliation_manual_review_at?: Date | null;
+  reconciliation_resolved_at?: Date | null;
   created_at: Date;
   updated_at: Date;
   expires_at: Date;
