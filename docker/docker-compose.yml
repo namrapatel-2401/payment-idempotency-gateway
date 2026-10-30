@@ -1,0 +1,80 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: payment-gateway-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: payment_gateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: payment-gateway-app
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: payment_gateway
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      PROVIDER_BASE_URL: http://provider:3001
+      LOG_LEVEL: info
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      provider:
+        condition: service_started
+    restart: unless-stopped
+
+  provider:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: payment-provider-sim
+    command: ["node", "dist/provider/app.js"]
+    environment:
+      NODE_ENV: production
+      PROVIDER_PORT: 3001
+      PROVIDER_FAILURE_RATE: "0.1"
+      PROVIDER_TIMEOUT_RATE: "0.1"
+      PROVIDER_MIN_LATENCY_MS: "100"
+      PROVIDER_MAX_LATENCY_MS: "500"
+      LOG_LEVEL: info
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+  redis:
+    image: redis:7-alpine
+    container_name: payment-gateway-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:

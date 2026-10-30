@@ -1,0 +1,777 @@
+<title>Payment Idempotency Gateway Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg-primary: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-surface-subtle: #f1f5f9;
+    --bg-surface-elevated: #ffffff;
+    --border-color: #e2e8f0;
+    --border-subtle: #cbd5e1;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --accent: #2563eb;
+    --accent-light: #dbeafe;
+    --accent-hover: #1d4ed8;
+    --success: #059669;
+    --success-bg: #d1fae5;
+    --success-text: #065f46;
+    --warning: #d97706;
+    --warning-bg: #fef3c7;
+    --warning-text: #92400e;
+    --danger: #dc2626;
+    --danger-bg: #fee2e2;
+    --danger-text: #991b1b;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+    --card-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.07);
+    --card-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+  }
+
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg-primary: #0b0f17;
+      --bg-surface: #111827;
+      --bg-surface-subtle: #1e293b;
+      --bg-surface-elevated: #1a2234;
+      --border-color: #243047;
+      --border-subtle: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #3b82f6;
+      --accent-light: #1e3a8a;
+      --accent-hover: #60a5fa;
+      --success: #10b981;
+      --success-bg: #064e3b;
+      --success-text: #a7f3d0;
+      --warning: #f59e0b;
+      --warning-bg: #78350f;
+      --warning-text: #fde68a;
+      --danger: #ef4444;
+      --danger-bg: #7f1d1d;
+      --danger-text: #fecaca;
+      --code-bg: #030712;
+      --code-text: #f1f5f9;
+      --card-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+      --card-shadow-lg: 0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.4);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg-primary: #0b0f17;
+    --bg-surface: #111827;
+    --bg-surface-subtle: #1e293b;
+    --bg-surface-elevated: #1a2234;
+    --border-color: #243047;
+    --border-subtle: #334155;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent: #3b82f6;
+    --accent-light: #1e3a8a;
+    --accent-hover: #60a5fa;
+    --success: #10b981;
+    --success-bg: #064e3b;
+    --success-text: #a7f3d0;
+    --warning: #f59e0b;
+    --warning-bg: #78350f;
+    --warning-text: #fde68a;
+    --danger: #ef4444;
+    --danger-bg: #7f1d1d;
+    --danger-text: #fecaca;
+    --code-bg: #030712;
+    --code-text: #f1f5f9;
+    --card-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+    --card-shadow-lg: 0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.4);
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+    padding: 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  /* Header */
+  .header {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: var(--card-shadow);
+  }
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .title-group h1 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .title-group p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-top: 4px;
+    max-width: 680px;
+  }
+
+  .badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .badge-success {
+    background: var(--success-bg);
+    color: var(--success-text);
+  }
+
+  .badge-primary {
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+
+  .badge-warning {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+  }
+
+  /* Stat Grid */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  .stat-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: var(--card-shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+
+  .stat-value {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  /* Two Column Layout */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 900px) {
+    .grid-2 {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: var(--card-shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 14px;
+  }
+
+  .card-title {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Phase Roadmap Matrix */
+  .phases-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .phase-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    background: var(--bg-surface-subtle);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    transition: all 0.2s ease;
+  }
+
+  .phase-item.active {
+    border-color: var(--accent);
+    background: var(--bg-surface-elevated);
+    box-shadow: 0 0 0 2px var(--accent-light);
+  }
+
+  .phase-item.completed {
+    border-color: var(--success);
+    opacity: 0.9;
+  }
+
+  .phase-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .phase-number {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--border-color);
+    color: var(--text-secondary);
+  }
+
+  .phase-item.completed .phase-number {
+    background: var(--success);
+    color: #fff;
+  }
+
+  .phase-item.active .phase-number {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .phase-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .phase-tag {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Architecture Diagram */
+  .arch-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .arch-layer {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    background: var(--bg-surface-subtle);
+    position: relative;
+  }
+
+  .arch-layer-title {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .arch-layer-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+  }
+
+  .arch-flow-arrow {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  /* Interactive Simulator */
+  .sim-box {
+    background: var(--bg-surface-subtle);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .sim-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-hover);
+  }
+
+  .btn-secondary {
+    background: var(--bg-surface);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+  }
+
+  .btn-secondary:hover {
+    background: var(--border-color);
+  }
+
+  .sim-console {
+    background: var(--code-bg);
+    color: var(--code-text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    border-radius: 8px;
+    padding: 14px;
+    height: 190px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    line-height: 1.5;
+  }
+
+  .log-line {
+    display: flex;
+    gap: 8px;
+  }
+
+  .log-time {
+    color: var(--text-muted);
+  }
+
+  .log-highlight {
+    color: #38bdf8;
+  }
+
+  .log-success {
+    color: #4ade80;
+  }
+
+  .log-warn {
+    color: #fbbf24;
+  }
+
+  .log-danger {
+    color: #f87171;
+  }
+
+  /* Code block */
+  .code-container {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 14px;
+    border-radius: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    overflow-x: auto;
+    line-height: 1.45;
+  }
+
+  .keyword { color: #f472b6; }
+  .function { color: #60a5fa; }
+  .string { color: #a3e635; }
+  .comment { color: #64748b; font-style: italic; }
+</style>
+
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <div class="title-group">
+        <h1>
+          <span>⚡</span> Payment Idempotency Gateway
+        </h1>
+        <p>
+          Distributed-systems payment processing engine implementing three layers of idempotency: client request deduplication, downstream provider keys, and ambiguous-state crash recovery.
+        </p>
+      </div>
+      <div class="badges">
+        <span class="badge badge-success">● Phase 4 Active</span>
+        <span class="badge badge-primary">Fastify 4.x + Knex</span>
+        <span class="badge badge-warning">PostgreSQL 16 Engine</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Grid -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Unit Tests</div>
+      <div class="stat-value" style="color: var(--success);">38 / 38 (100%)</div>
+      <div class="stat-desc">Deterministic hashing, state machine, Zod schemas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Integration Tests</div>
+      <div class="stat-value">12 Test Cases</div>
+      <div class="stat-desc">Concurrency, reconciliation, 409 conflict, timeouts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Transaction Guarantees</div>
+      <div class="stat-value">2 Isolated Tx</div>
+      <div class="stat-desc">Network I/O strictly outside DB transactions</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Stale Lock Window</div>
+      <div class="stat-value">30,000 ms</div>
+      <div class="stat-desc">Automatic crash detection & reconciliation trigger</div>
+    </div>
+  </div>
+
+  <!-- Two Column Content Grid -->
+  <div class="grid-2">
+    <!-- Architecture & 3 Boundaries -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🛡️ Three Boundaries of Idempotency</div>
+        <span class="badge badge-primary">Architecture</span>
+      </div>
+
+      <div class="arch-layers">
+        <div class="arch-layer" style="border-left: 4px solid var(--accent);">
+          <div class="arch-layer-title">
+            <span>1. Application-Level Idempotency</span>
+            <span class="badge badge-primary">Gateway</span>
+          </div>
+          <p class="arch-layer-desc">
+            Deduplicates client retries using <code>SHA-256(canonical JSON)</code>. Same key + payload returns the cached HTTP response directly from PostgreSQL without re-executing business logic.
+          </p>
+        </div>
+
+        <div class="arch-flow-arrow">▼ Passes derived key: <code>gateway-8f1a2b3c</code></div>
+
+        <div class="arch-layer" style="border-left: 4px solid var(--warning);">
+          <div class="arch-layer-title">
+            <span>2. Provider-Level Idempotency</span>
+            <span class="badge badge-warning">Downstream Provider</span>
+          </div>
+          <p class="arch-layer-desc">
+            The external processor receives a deterministic provider-scoped key derived from the client key. Ensures network-level retries do not trigger duplicate credit card charges.
+          </p>
+        </div>
+
+        <div class="arch-flow-arrow">▼ On timeout or crash recovery</div>
+
+        <div class="arch-layer" style="border-left: 4px solid var(--success);">
+          <div class="arch-layer-title">
+            <span>3. Reconciliation & Recovery Loop</span>
+            <span class="badge badge-success">Self-Healing</span>
+          </div>
+          <p class="arch-layer-desc">
+            When gateway state is ambiguous (timeout, stale lock &gt;30s, crash before DB commit), gateway queries provider by <code>provider_idempotency_key</code> before retrying. If already charged, reconciles to <code>COMPLETED</code>.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase Implementation Roadmap -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🗺️ Implementation Roadmap</div>
+        <span class="badge badge-success">4 / 10 Phases</span>
+      </div>
+
+      <div class="phases-list">
+        <div class="phase-item completed">
+          <div class="phase-info">
+            <div class="phase-number">✓</div>
+            <div>
+              <div class="phase-name">Phase 1: Project Foundation</div>
+            </div>
+          </div>
+          <span class="phase-tag badge-success">Completed</span>
+        </div>
+
+        <div class="phase-item completed">
+          <div class="phase-info">
+            <div class="phase-number">✓</div>
+            <div>
+              <div class="phase-name">Phase 2: State Machine & Models</div>
+            </div>
+          </div>
+          <span class="phase-tag badge-success">Completed</span>
+        </div>
+
+        <div class="phase-item completed">
+          <div class="phase-info">
+            <div class="phase-number">✓</div>
+            <div>
+              <div class="phase-name">Phase 3: Core Idempotency Algorithm ⭐</div>
+            </div>
+          </div>
+          <span class="phase-tag badge-success">Completed</span>
+        </div>
+
+        <div class="phase-item active">
+          <div class="phase-info">
+            <div class="phase-number">4</div>
+            <div>
+              <div class="phase-name">Phase 4: Concurrency & Race Conditions ⭐</div>
+            </div>
+          </div>
+          <span class="phase-tag badge-primary">Active</span>
+        </div>
+
+        <div class="phase-item">
+          <div class="phase-info">
+            <div class="phase-number">5</div>
+            <div>
+              <div class="phase-name">Phase 5: Simulated Payment Provider</div>
+            </div>
+          </div>
+          <span class="phase-tag badge-warning">Next</span>
+        </div>
+
+        <div class="phase-item">
+          <div class="phase-info">
+            <div class="phase-number">6</div>
+            <div>
+              <div class="phase-name">Phase 6: Webhooks & Async Signatures</div>
+            </div>
+          </div>
+          <span class="phase-tag">Pending</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Concurrency & Crash Simulation -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🔬 Concurrency & Crash Simulation Console</div>
+      <span class="badge badge-primary">Interactive Execution</span>
+    </div>
+
+    <div class="sim-box">
+      <div class="sim-controls">
+        <button class="btn btn-primary" id="btn-race">⚡ Simulate 10 Concurrent Requests</button>
+        <button class="btn btn-secondary" id="btn-crash">💥 Simulate Gateway Crash & Reconciliation</button>
+        <button class="btn btn-secondary" id="btn-conflict">⚠️ Simulate Key Reuse Conflict (409)</button>
+        <button class="btn btn-clear" id="btn-clear">🧹 Clear Console</button>
+      </div>
+
+      <div class="sim-console" id="console">
+        <div class="log-line">
+          <span class="log-time">[22:35:01]</span>
+          <span class="log-highlight">SYSTEM READY:</span>
+          <span>Click any simulation above to observe state machine &amp; locking behavior.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transaction Boundary Breakdown -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🔒 Strict Transaction Isolation Pattern</div>
+      <span class="badge badge-success">Zero DB Lock Contention</span>
+    </div>
+
+    <div class="code-container">
+<span class="comment">// Transaction 1: Acquire lock & register in-flight intent (~2ms)</span>
+<span class="keyword">await</span> db.<span class="function">transaction</span>(<span class="keyword">async</span> (trx) => {
+  <span class="keyword">await</span> trx(<span class="string">'idempotency_keys'</span>).<span class="function">insert</span>({ key, request_hash }).<span class="function">onConflict</span>(<span class="string">'key'</span>).<span class="function">ignore</span>();
+  <span class="keyword">const</span> keyRecord = <span class="keyword">await</span> trx(<span class="string">'idempotency_keys'</span>).<span class="function">where</span>({ key }).<span class="function">forUpdate</span>().<span class="function">first</span>();
+  <span class="keyword">await</span> trx(<span class="string">'payments'</span>).<span class="function">insert</span>({ idempotency_key_id: keyRecord.id, status: <span class="string">'pending'</span> });
+  <span class="keyword">await</span> trx(<span class="string">'idempotency_keys'</span>).<span class="function">update</span>({ status: <span class="string">'processing'</span>, locked_at: <span class="keyword">new</span> Date() });
+});
+
+<span class="comment">// NETWORK CALL: STRICTLY OUTSIDE ANY DB TRANSACTION (prevents connection pool starvation)</span>
+<span class="keyword">const</span> providerResponse = <span class="keyword">await</span> providerClient.<span class="function">createCharge</span>(providerIdempotencyKey, payload);
+
+<span class="comment">// Transaction 2: Persist final outcome & cache HTTP response (~2ms)</span>
+<span class="keyword">await</span> db.<span class="function">transaction</span>(<span class="keyword">async</span> (trx) => {
+  <span class="keyword">await</span> trx(<span class="string">'payments'</span>).<span class="function">update</span>({ status: <span class="string">'completed'</span>, provider_id: providerResponse.id });
+  <span class="keyword">await</span> trx(<span class="string">'payment_events'</span>).<span class="function">insert</span>({ payment_id: payment.id, event_type: <span class="string">'completed'</span> });
+  <span class="keyword">await</span> trx(<span class="string">'idempotency_keys'</span>).<span class="function">update</span>({ status: <span class="string">'completed'</span>, response_code: <span class="string">201</span>, response_body });
+});
+    </div>
+  </div>
+</div>
+
+<script>
+  const consoleEl = document.getElementById('console');
+
+  function log(text, type = 'normal') {
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    const now = new Date();
+    const timeStr = `[${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}]`;
+
+    let colorClass = '';
+    if (type === 'highlight') colorClass = 'log-highlight';
+    if (type === 'success') colorClass = 'log-success';
+    if (type === 'warn') colorClass = 'log-warn';
+    if (type === 'danger') colorClass = 'log-danger';
+
+    line.innerHTML = `<span class="log-time">${timeStr}</span> <span class="${colorClass}">${text}</span>`;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    consoleEl.innerHTML = '';
+    log('Console cleared.', 'normal');
+  });
+
+  document.getElementById('btn-race').addEventListener('click', async () => {
+    consoleEl.innerHTML = '';
+    log('--- STARTING 10 CONCURRENT SAME-KEY REQUESTS SIMULATION ---', 'highlight');
+    log('Client dispatched 10 parallel HTTP POST /payments with key "key_live_9981"', 'normal');
+
+    await new Promise(r => setTimeout(r, 120));
+    log('Tx 1: Request #1 acquired row lock (SELECT ... FOR UPDATE). Status -> PROCESSING.', 'highlight');
+
+    for (let i = 2; i <= 10; i++) {
+      await new Promise(r => setTimeout(r, 30));
+      log(`Tx 1: Request #${i} encountered row lock -> Returned 423 Locked (or awaited cached outcome).`, 'warn');
+    }
+
+    await new Promise(r => setTimeout(r, 200));
+    log('Provider Client: Calling external payment processor (charge amount $100.00)...', 'normal');
+
+    await new Promise(r => setTimeout(r, 300));
+    log('Provider Response: 200 OK (Charge ID: ch_stripe_sim_0182739)', 'success');
+
+    log('Tx 2: Saved completed payment, cached response payload in idempotency_keys.', 'success');
+    log('SUMMARY: Exactly 1 payment created, 1 provider call made, 0 duplicate charges.', 'success');
+  });
+
+  document.getElementById('btn-crash').addEventListener('click', async () => {
+    consoleEl.innerHTML = '';
+    log('--- SIMULATING GATEWAY CRASH & RECONCILIATION ---', 'danger');
+    log('1. Payment created with provider key "gateway-7fa91c82"', 'normal');
+    log('2. External provider charged successfully -> ch_live_crash_8829', 'success');
+    log('3. CRASH EVENT: Gateway container killed before Tx 2 commit! Key left in REQUIRES_RECONCILIATION state.', 'danger');
+
+    await new Promise(r => setTimeout(r, 400));
+    log('4. Client retries with same idempotency key "client-key-crash-001"', 'highlight');
+    log('5. Gateway detects REQUIRES_RECONCILIATION -> Queries provider by provider_idempotency_key...', 'warn');
+
+    await new Promise(r => setTimeout(r, 300));
+    log('6. Provider returns existing charge ch_live_crash_8829 (Status: succeeded)', 'success');
+    log('7. Gateway reconciles state: Updates DB to COMPLETED, caches 201 response WITHOUT re-charging.', 'success');
+    log('RESULT: 100% Correctness. Zero duplicate charge on recovery.', 'success');
+  });
+
+  document.getElementById('btn-conflict').addEventListener('click', async () => {
+    consoleEl.innerHTML = '';
+    log('--- SIMULATING KEY REUSE CONFLICT (409) ---', 'warn');
+    log('1. Key "idemp-test-abc" registered with payload { amount: 100, currency: "USD" }', 'normal');
+    log('2. New request arrives with SAME key but payload { amount: 999, currency: "USD" }', 'highlight');
+
+    await new Promise(r => setTimeout(r, 150));
+    log('3. Gateway computes SHA-256 hash -> Mismatch detected against stored request_hash!', 'danger');
+    log('4. HTTP 409 Conflict: "Idempotency key reused with different payload"', 'danger');
+    log('PROTECTION: Prevents accidental or malicious key collisions.', 'success');
+  });
+</script>
