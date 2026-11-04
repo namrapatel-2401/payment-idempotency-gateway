@@ -12,3 +12,5 @@
 - Merchant/account authorization and multi-tenant isolation are outside the current project scope.
 - Reconciliation provider lookup success and failure are persisted through the same fenced observation path; an unknown lookup remains recoverable, and a webhook terminal result fences an older reconciliation response.
 - Migration rollback is restricted: 003 may remove active fencing metadata, 004 may remove durable conflict evidence, and 005 refuses rollback when incompatible Stage 2 records exist.
+- Future reliability work: classify provider errors with structured codes/statuses instead of message-substring matching.
+- Future reliability work: add a full webhook-route-driven race test for a worker lookup completing after a webhook establishes a terminal result.

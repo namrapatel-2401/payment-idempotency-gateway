@@ -78,6 +78,17 @@ export class PaymentRepository {
   }
 
   /**
+   * Find the payment for an idempotency key while preserving key -> payment
+   * lock acquisition order for recovery persistence transactions.
+   */
+  async findByIdAndLockByKey(
+    idempotencyKeyId: string,
+    db: DbExecutor = getDb(),
+  ): Promise<Payment | null> {
+    return this.findByIdempotencyKeyIdAndLock(idempotencyKeyId, db);
+  }
+
+  /**
    * Find payment by provider idempotency key
    */
   async findByProviderIdempotencyKey(

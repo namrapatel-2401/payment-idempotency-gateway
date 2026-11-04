@@ -11,6 +11,7 @@
     "dev:provider": "tsx watch provider/app.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "worker:reconciliation": "tsx src/workers/uncertain-payment-recovery.ts",
     "migrate:latest": "knex migrate:latest",
     "migrate:rollback": "knex migrate:rollback",
     "migrate:make": "knex migrate:make",
