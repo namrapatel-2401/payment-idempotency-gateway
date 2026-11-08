@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: payment-reliability-playground-free
+    runtime: static
+    region: oregon
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+
+  - type: web
+    name: payment-gateway-free-demo
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build && npm run build:provider
+    startCommand: npm run migrate:latest && node dist/free-demo.js
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        fromDatabase:
+          name: payment-gateway-free-db
+          property: connectionString
+      - key: DB_POOL_MIN
+        value: "0"
+      - key: DB_POOL_MAX
+        value: "10"
+      - key: PROVIDER_BASE_URL
+        value: http://127.0.0.1:3001
+      - key: PROVIDER_PORT
+        value: "3001"
+      - key: PROVIDER_FAILURE_RATE
+        value: "0.1"
+      - key: PROVIDER_TIMEOUT_RATE
+        value: "0.1"
+      - key: PROVIDER_MIN_LATENCY_MS
+        value: "100"
+      - key: PROVIDER_MAX_LATENCY_MS
+        value: "500"
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+
+databases:
+  - name: payment-gateway-free-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: "16"
+    databaseName: payment_gateway
