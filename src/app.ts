@@ -45,7 +45,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
   });
 
   await app.register(cors, {
-    origin: config.nodeEnv === "development" ? "*" : false,
+    origin:
+      config.nodeEnv === "development"
+        ? "*"
+        : config.corsOrigin ?? false,
   });
 
   // Register routes

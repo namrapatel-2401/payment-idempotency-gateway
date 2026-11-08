@@ -1,0 +1,137 @@
+services:
+  - type: web
+    name: payment-gateway-api
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run migrate:latest && npm start
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        fromDatabase:
+          name: payment-gateway-db
+          property: connectionString
+      - key: DB_POOL_MIN
+        value: "0"
+      - key: DB_POOL_MAX
+        value: "10"
+      - key: PROVIDER_BASE_URL
+        value: http://payment-provider:3001
+      - key: PROVIDER_TIMEOUT_MS
+        value: "10000"
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+
+  - type: web
+    name: payment-reliability-playground
+    runtime: static
+    region: oregon
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+
+  - type: pserv
+    name: payment-provider
+    runtime: node
+    region: oregon
+    plan: 0.5c-512mb
+    buildCommand: npm ci --include=dev && npm run build:provider
+    startCommand: node dist-provider/app.js
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: PROVIDER_PORT
+        value: "3001"
+      - key: PROVIDER_FAILURE_RATE
+        value: "0.1"
+      - key: PROVIDER_TIMEOUT_RATE
+        value: "0.1"
+      - key: PROVIDER_MIN_LATENCY_MS
+        value: "100"
+      - key: PROVIDER_MAX_LATENCY_MS
+        value: "500"
+
+  - type: worker
+    name: uncertain-payment-recovery
+    runtime: node
+    region: oregon
+    plan: 0.5c-512mb
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run migrate:latest && node dist/workers/uncertain-payment-recovery.js
+    maxShutdownDelaySeconds: 90
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: payment-gateway-db
+          property: connectionString
+      - key: PROVIDER_BASE_URL
+        value: http://payment-provider:3001
+      - key: WEBHOOK_SECRET
+        fromService:
+          name: payment-gateway-api
+          type: web
+          envVarKey: WEBHOOK_SECRET
+
+  - type: worker
+    name: provider-conflict-resolution
+    runtime: node
+    region: oregon
+    plan: 0.5c-512mb
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run migrate:latest && node dist/workers/provider-conflict-resolution.js
+    maxShutdownDelaySeconds: 90
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: payment-gateway-db
+          property: connectionString
+      - key: PROVIDER_BASE_URL
+        value: http://payment-provider:3001
+      - key: WEBHOOK_SECRET
+        fromService:
+          name: payment-gateway-api
+          type: web
+          envVarKey: WEBHOOK_SECRET
+
+  - type: worker
+    name: orphaned-webhook-recovery
+    runtime: node
+    region: oregon
+    plan: 0.5c-512mb
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run migrate:latest && node dist/workers/orphaned-webhook-recovery.js
+    maxShutdownDelaySeconds: 90
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: payment-gateway-db
+          property: connectionString
+      - key: PROVIDER_BASE_URL
+        value: http://payment-provider:3001
+      - key: WEBHOOK_SECRET
+        fromService:
+          name: payment-gateway-api
+          type: web
+          envVarKey: WEBHOOK_SECRET
+
+databases:
+  - name: payment-gateway-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: "16"
+    databaseName: payment_gateway

@@ -12,8 +12,10 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),
+  CORS_ORIGIN: z.string().url().optional(),
 
   DB_HOST: z.string().default("localhost"),
+  DATABASE_URL: z.string().url().optional(),
   DB_PORT: z
     .string()
     .transform(Number)
@@ -75,8 +77,10 @@ const buildConfig = () =>
     nodeEnv: env.NODE_ENV,
     port: env.PORT,
     logLevel: env.LOG_LEVEL,
+    corsOrigin: env.CORS_ORIGIN,
 
     db: {
+      url: env.DATABASE_URL,
       host: env.DB_HOST,
       port: env.DB_PORT,
       name: env.DB_NAME,

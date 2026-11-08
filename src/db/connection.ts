@@ -8,7 +8,7 @@ export const getDb = (): Knex => {
   if (!db) {
     db = knex({
       client: "pg",
-      connection: {
+      connection: config.db.url ?? {
         host: config.db.host,
         port: config.db.port,
         database: config.db.name,

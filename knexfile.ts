@@ -3,7 +3,7 @@ import { config } from './src/config.js';
 
 const knexConfig: Knex.Config = {
   client: 'pg',
-  connection: {
+  connection: config.db.url ?? {
     host: config.db.host,
     port: config.db.port,
     database: config.db.name,
