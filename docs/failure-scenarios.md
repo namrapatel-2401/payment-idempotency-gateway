@@ -14,3 +14,7 @@
 - Migration rollback is restricted: 003 may remove active fencing metadata, 004 may remove durable conflict evidence, and 005 refuses rollback when incompatible Stage 2 records exist.
 - Future reliability work: classify provider errors with structured codes/statuses instead of message-substring matching.
 - Future reliability work: add a full webhook-route-driven race test for a worker lookup completing after a webhook establishes a terminal result.
+- Orphaned webhook recovery claims pending records with a lease, reapplies the original observation once the payment is identifiable, and preserves terminal payment states.
+- Orphan correlation conflicts are durable and retried; exhausted or permanently unidentifiable records move to manual review without fabricating payment associations.
+- Recovery workers emit structured lifecycle and outcome signals. Claims, retries, stale workers, manual-review transitions and in-flight counts are visible by workflow; `/metrics` exposes gateway-process counters for operational checks.
+- Metrics are process-local. Restarting a process resets its counters, while PostgreSQL remains the source of truth for recovery state, attempts, leases and manual-review records.
