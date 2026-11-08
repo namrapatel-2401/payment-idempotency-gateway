@@ -2,7 +2,6 @@ services:
   - type: web
     name: payment-reliability-playground-free
     runtime: static
-    region: oregon
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
     envVars:
@@ -17,7 +16,6 @@ services:
     buildCommand: npm ci --include=dev && npm run build && npm run build:provider
     startCommand: npm run migrate:latest && node dist/free-demo.js
     healthCheckPath: /health
-    maxShutdownDelaySeconds: 60
     envVars:
       - key: NODE_ENV
         value: production
