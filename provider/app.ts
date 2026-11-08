@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { pathToFileURL } from 'node:url';
 import { providerConfig } from './config.js';
 import { chargeRoutes } from './routes/charge.js';
 import { configRoutes } from './routes/config.js';
@@ -46,6 +47,6 @@ const start = async () => {
   }
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   start();
 }
