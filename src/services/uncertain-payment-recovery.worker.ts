@@ -8,6 +8,13 @@ import { PaymentProviderClient, ProviderChargeResponse } from "./provider.client
 import { applyProviderObservation, ProviderObservation } from "./provider-observation.service.js";
 import { hashCanonicalJson } from "../utils/canonical-json.js";
 import { logger } from "../utils/logger.js";
+import {
+  logOperationalEvent,
+  recordRecoveryClaim,
+  recordRecoveryOutcome,
+  recordRecoveryPoll,
+  setRecoveryInFlight,
+} from "../observability/metrics.js";
 
 export type RecoveryWorkerOptions = {
   pollIntervalMs?: number;
@@ -89,15 +96,22 @@ export class UncertainPaymentRecoveryWorker {
         leaseMs: this.options.leaseMs,
       }, trx),
     ) as ClaimedKey[];
+    recordRecoveryClaim("uncertain_payment", claims.length);
+    logOperationalEvent("recovery.claimed", {
+      workflow: "uncertain_payment",
+      count: claims.length,
+    });
 
     const work = claims.map((claim) => this.processClaim(claim));
     await Promise.all(work);
+    recordRecoveryPoll("uncertain_payment", "completed");
     return claims.length;
   }
 
   start(): void {
     if (this.running) return;
     this.running = true;
+    logOperationalEvent("recovery.worker_started", { workflow: "uncertain_payment" });
     this.pollTask = this.poll();
   }
 
@@ -113,6 +127,7 @@ export class UncertainPaymentRecoveryWorker {
     }
     await this.cycleTail;
     await Promise.all([...this.active]);
+    logOperationalEvent("recovery.worker_stopped", { workflow: "uncertain_payment" });
   }
 
   private async poll(): Promise<void> {
@@ -120,6 +135,7 @@ export class UncertainPaymentRecoveryWorker {
     try {
       await this.runOnce();
     } catch (error) {
+      recordRecoveryPoll("uncertain_payment", "failed");
       logger.error({ error }, "Uncertain payment recovery poll failed");
     }
     if (this.running) {
@@ -130,8 +146,12 @@ export class UncertainPaymentRecoveryWorker {
   private async processClaim(claim: ClaimedKey): Promise<void> {
     const operation = this.processClaimOwned(claim)
       .catch((error) => this.handleFailure(claim, error))
-      .finally(() => this.active.delete(operation));
+      .finally(() => {
+        this.active.delete(operation);
+        setRecoveryInFlight("uncertain_payment", this.active.size);
+      });
     this.active.add(operation);
+    setRecoveryInFlight("uncertain_payment", this.active.size);
     await operation;
   }
 
@@ -201,7 +221,7 @@ export class UncertainPaymentRecoveryWorker {
           ? IdempotencyKeyStatus.FAILED
           : null;
       if (finalStatus) {
-        await trx("idempotency_keys")
+        const resolved = await trx("idempotency_keys")
           .where({ id: claim.id, claim_generation: claim.claim_generation, reconciliation_claim_token: claim.reconciliation_claim_token })
           .whereIn("status", [IdempotencyKeyStatus.COMPLETED, IdempotencyKeyStatus.FAILED])
           .update({
@@ -211,6 +231,7 @@ export class UncertainPaymentRecoveryWorker {
             reconciliation_resolved_at: trx.fn.now(),
             reconciliation_last_error: null,
           });
+        if (resolved) recordRecoveryOutcome("uncertain_payment", "resolved");
       }
     });
   }
@@ -219,20 +240,30 @@ export class UncertainPaymentRecoveryWorker {
     const message = error instanceof Error ? error.message : String(error);
     const manualReview = claim.reconciliation_attempts >= this.options.maxAttempts || !isRetryableError(error);
     const nextAt = manualReview ? null : new Date(Date.now() + calculateRecoveryDelay(claim.reconciliation_attempts, this.options.random, this.options.maxBackoffMs));
-    await getDb().transaction((trx) => this.idempotencyRepo.releaseReconciliation(claim.id, claim.reconciliation_claim_token, {
+    const released = await getDb().transaction((trx) => this.idempotencyRepo.releaseReconciliation(claim.id, claim.reconciliation_claim_token, {
       nextAt,
       error: message,
       manualReview,
     }, trx));
+    if (released) {
+      recordRecoveryOutcome("uncertain_payment", manualReview ? "manual_review" : "retrying");
+      logOperationalEvent("recovery.outcome", {
+        workflow: "uncertain_payment",
+        outcome: manualReview ? "manual_review" : "retrying",
+      });
+    } else {
+      recordRecoveryOutcome("uncertain_payment", "stale");
+    }
   }
 
   private async releaseWithinTransaction(trx: import("knex").Knex.Transaction, claim: ClaimedKey, error: string): Promise<void> {
     const manualReview = claim.reconciliation_attempts >= this.options.maxAttempts;
-    await this.idempotencyRepo.releaseReconciliation(claim.id, claim.reconciliation_claim_token, {
+    const released = await this.idempotencyRepo.releaseReconciliation(claim.id, claim.reconciliation_claim_token, {
       nextAt: manualReview ? null : new Date(Date.now() + calculateRecoveryDelay(claim.reconciliation_attempts, this.options.random, this.options.maxBackoffMs)),
       error,
       manualReview,
     }, trx);
+    if (released) recordRecoveryOutcome("uncertain_payment", manualReview ? "manual_review" : "retrying");
   }
 
   private ownsClaim(key: IdempotencyKey | null, claim: ClaimedKey): boolean {

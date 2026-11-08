@@ -8,6 +8,13 @@ import { PaymentStatus } from "../models/payment-status.js";
 import { PaymentProviderClient, ProviderChargeResponse } from "./provider.client.js";
 import { calculateRecoveryDelay } from "./uncertain-payment-recovery.worker.js";
 import { logger } from "../utils/logger.js";
+import {
+  logOperationalEvent,
+  recordRecoveryClaim,
+  recordRecoveryOutcome,
+  recordRecoveryPoll,
+  setRecoveryInFlight,
+} from "../observability/metrics.js";
 
 type ConflictClaim = {
   id: string;
@@ -70,13 +77,17 @@ export class ProviderConflictResolutionWorker {
       batchSize: Math.min(this.options.batchSize, available),
       leaseMs: this.options.leaseMs,
     }, trx)) as ConflictClaim[];
+    recordRecoveryClaim("provider_conflict", claims.length);
+    logOperationalEvent("recovery.claimed", { workflow: "provider_conflict", count: claims.length });
     await Promise.all(claims.map((claim) => this.processClaim(claim)));
+    recordRecoveryPoll("provider_conflict", "completed");
     return claims.length;
   }
 
   start(): void {
     if (this.running) return;
     this.running = true;
+    logOperationalEvent("recovery.worker_started", { workflow: "provider_conflict" });
     this.pollTask = this.poll();
   }
 
@@ -92,6 +103,7 @@ export class ProviderConflictResolutionWorker {
     }
     await this.cycleTail;
     await Promise.all([...this.active]);
+    logOperationalEvent("recovery.worker_stopped", { workflow: "provider_conflict" });
   }
 
   private async poll(): Promise<void> {
@@ -99,6 +111,7 @@ export class ProviderConflictResolutionWorker {
     try {
       await this.runOnce();
     } catch (error) {
+      recordRecoveryPoll("provider_conflict", "failed");
       logger.error({ error }, "Provider conflict resolution poll failed");
     }
     if (this.running) this.timer = setTimeout(() => void this.poll(), this.options.pollIntervalMs);
@@ -109,8 +122,10 @@ export class ProviderConflictResolutionWorker {
       .catch((error) => this.releaseAfterFailure(claim, error))
       .finally(() => {
         this.active.delete(operation);
+        setRecoveryInFlight("provider_conflict", this.active.size);
       });
     this.active.add(operation);
+    setRecoveryInFlight("provider_conflict", this.active.size);
     await operation;
   }
 
@@ -182,6 +197,7 @@ export class ProviderConflictResolutionWorker {
         });
       }
       const resolved = await this.conflictRepo.markResolved(conflict.id, claim.resolution_claim_token, resolution, trx);
+      if (resolved) recordRecoveryOutcome("provider_conflict", "resolved");
     });
   }
 
@@ -190,6 +206,7 @@ export class ProviderConflictResolutionWorker {
     const manualReview = claim.resolution_attempts >= this.options.maxAttempts || !isRetryableError(error);
     const nextAt = manualReview ? null : new Date(Date.now() + calculateRecoveryDelay(claim.resolution_attempts, this.options.random, this.options.maxBackoffMs));
     const released = await getDb().transaction((trx) => this.conflictRepo.release(claim.id, claim.resolution_claim_token, { nextAt, error: message, manualReview }, trx));
+    recordRecoveryOutcome("provider_conflict", released ? (manualReview ? "manual_review" : "retrying") : "stale");
   }
 
   private async releaseWithinTransaction(trx: import("knex").Knex.Transaction, claim: ConflictClaim, error: string): Promise<void> {
@@ -199,5 +216,6 @@ export class ProviderConflictResolutionWorker {
       error,
       manualReview,
     }, trx);
+    if (released) recordRecoveryOutcome("provider_conflict", manualReview ? "manual_review" : "retrying");
   }
 }

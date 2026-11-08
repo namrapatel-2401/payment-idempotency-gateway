@@ -7,6 +7,13 @@ import { applyProviderObservation, ProviderObservation } from "./provider-observ
 import { calculateRecoveryDelay } from "./uncertain-payment-recovery.worker.js";
 import { logger } from "../utils/logger.js";
 import { hashCanonicalJson } from "../utils/canonical-json.js";
+import {
+  logOperationalEvent,
+  recordRecoveryClaim,
+  recordRecoveryOutcome,
+  recordRecoveryPoll,
+  setRecoveryInFlight,
+} from "../observability/metrics.js";
 
 type OrphanClaim = {
   id: string;
@@ -65,13 +72,17 @@ export class OrphanedWebhookRecoveryWorker {
       batchSize: Math.min(this.options.batchSize, available),
       leaseMs: this.options.leaseMs,
     }, trx)) as OrphanClaim[];
+    recordRecoveryClaim("orphaned_webhook", claims.length);
+    logOperationalEvent("recovery.claimed", { workflow: "orphaned_webhook", count: claims.length });
     await Promise.all(claims.map((claim) => this.processClaim(claim)));
+    recordRecoveryPoll("orphaned_webhook", "completed");
     return claims.length;
   }
 
   start(): void {
     if (this.running) return;
     this.running = true;
+    logOperationalEvent("recovery.worker_started", { workflow: "orphaned_webhook" });
     this.pollTask = this.poll();
   }
 
@@ -87,6 +98,7 @@ export class OrphanedWebhookRecoveryWorker {
     }
     await this.cycleTail;
     await Promise.all([...this.active]);
+    logOperationalEvent("recovery.worker_stopped", { workflow: "orphaned_webhook" });
   }
 
   private async poll(): Promise<void> {
@@ -94,6 +106,7 @@ export class OrphanedWebhookRecoveryWorker {
     try {
       await this.runOnce();
     } catch (error) {
+      recordRecoveryPoll("orphaned_webhook", "failed");
       logger.error({ error }, "Orphan webhook recovery poll failed");
     }
     if (this.running) this.timer = setTimeout(() => void this.poll(), this.options.pollIntervalMs);
@@ -104,8 +117,10 @@ export class OrphanedWebhookRecoveryWorker {
       .catch((error) => this.releaseAfterFailure(claim, error))
       .finally(() => {
         this.active.delete(operation);
+        setRecoveryInFlight("orphaned_webhook", this.active.size);
       });
     this.active.add(operation);
+    setRecoveryInFlight("orphaned_webhook", this.active.size);
     await operation;
   }
 
@@ -179,6 +194,7 @@ export class OrphanedWebhookRecoveryWorker {
         .first();
       if (existingEvent) {
         const resolved = await this.orphanRepo.markResolved(claim.id, claim.recovery_claim_token, "already_applied", trx);
+        if (resolved) recordRecoveryOutcome("orphaned_webhook", "resolved");
         return;
       }
 
@@ -189,10 +205,13 @@ export class OrphanedWebhookRecoveryWorker {
         await this.releaseWithinTransaction(trx, claim, "Webhook provider identifiers conflict");
       } else if (applied.kind === "conflict") {
         const resolved = await this.orphanRepo.markResolved(claim.id, claim.recovery_claim_token, "terminal_conflict_preserved", trx);
+        if (resolved) recordRecoveryOutcome("orphaned_webhook", "resolved");
       } else if (applied.kind === "ignored") {
         const resolved = await this.orphanRepo.markResolved(claim.id, claim.recovery_claim_token, "ignored_older_observation", trx);
+        if (resolved) recordRecoveryOutcome("orphaned_webhook", "resolved");
       } else {
         const resolved = await this.orphanRepo.markResolved(claim.id, claim.recovery_claim_token, "applied", trx);
+        if (resolved) recordRecoveryOutcome("orphaned_webhook", "resolved");
       }
     });
   }
@@ -202,6 +221,7 @@ export class OrphanedWebhookRecoveryWorker {
     const manualReview = claim.recovery_attempts >= this.options.maxAttempts;
     const nextAt = manualReview ? null : new Date(Date.now() + calculateRecoveryDelay(claim.recovery_attempts, this.options.random, this.options.maxBackoffMs));
     const released = await getDb().transaction((trx) => this.orphanRepo.release(claim.id, claim.recovery_claim_token, { nextAt, error: message, manualReview }, trx));
+    recordRecoveryOutcome("orphaned_webhook", released ? (manualReview ? "manual_review" : "retrying") : "stale");
   }
 
   private async releaseWithinTransaction(trx: import("knex").Knex.Transaction, claim: OrphanClaim, error: string): Promise<void> {
@@ -211,5 +231,6 @@ export class OrphanedWebhookRecoveryWorker {
       error,
       manualReview,
     }, trx);
+    if (released) recordRecoveryOutcome("orphaned_webhook", manualReview ? "manual_review" : "retrying");
   }
 }

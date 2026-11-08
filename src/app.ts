@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { checkDbHealth } from "./db/connection.js";
 import { paymentRoutes } from "./routes/payments.js";
 import { webhookRoutes } from "./routes/webhooks.js";
+import { metrics } from "./observability/metrics.js";
 
 export const buildApp = async (): Promise<FastifyInstance> => {
   const app = Fastify({
@@ -13,6 +14,21 @@ export const buildApp = async (): Promise<FastifyInstance> => {
     requestIdLogLabel: "reqId",
     disableRequestLogging: false,
     requestIdHeader: "x-request-id",
+  });
+
+  app.addHook("onRequest", async (request) => {
+    metrics.increment("http_requests_total", 1, {
+      method: request.method,
+      route: request.routeOptions.url ?? request.url.split("?")[0],
+    });
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
+    metrics.increment("http_responses_total", 1, {
+      method: request.method,
+      route: request.routeOptions.url ?? request.url.split("?")[0],
+      status: String(reply.statusCode),
+    });
   });
 
   // Register raw body parser (for HMAC webhook verification)
@@ -52,6 +68,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
     }
 
     return reply.status(200).send(health);
+  });
+
+  app.get("/metrics", async (_request, reply) => {
+    return reply.status(200).send(metrics.snapshot());
   });
 
   return app;
